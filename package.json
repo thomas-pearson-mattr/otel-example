@@ -1,0 +1,22 @@
+{
+  "name": "otel",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "node --import ./instrumentation.mjs app.js"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.6.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.39.4",
+    "@opentelemetry/resources": "^1.17.1",
+    "@opentelemetry/sdk-metrics": "^1.17.1",
+    "@opentelemetry/sdk-node": "^0.44.0",
+    "@opentelemetry/sdk-trace-base": "^1.17.1",
+    "@opentelemetry/semantic-conventions": "^1.17.1",
+    "axios": "^1.5.1",
+    "express": "^4.18.2",
+    "ts-node": "^10.9.1"
+  }
+}
