@@ -1,0 +1,142 @@
+networks:
+  default:
+    name: otel-example
+    driver: bridge
+
+services:
+  otel-datadog:
+    # This requires a DataDog account and setup you can sign up for a 14 day free trial
+    # https://github.com/DataDog/datadog-agent
+    # https://docs.datadoghq.com/containers/docker
+    image: datadog/agent:latest
+    profiles: ["datadog"]
+    pid: host
+    ports:
+      - "5000:5000"
+      - "5003:5003"
+      - "8125:8125"
+      - "6162:6162"
+      - "8126:8126"
+      - "4319:4317"
+      - "4320:4318"
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_SITE=${DD_SITE}
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+      - DD_APM_ENABLED=true
+      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=0.0.0.0:4317
+      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT=0.0.0.0:4318
+      # If you're on MacOS you will need to add "/opt/datadog/apm" to your docker "filesharingDirectories" settings as an allowed path
+      # vi ~/Library/Group\ Containers/group.com.docker/settings.json
+      - D_APM_RECEIVER_SOCKET=/opt/datadog/apm/inject/run/apm.socket
+      - DD_DOGSTATSD_SOCKET=/opt/datadog/apm/inject/run/dsd.socket
+      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+      - DD_OTLP_CONFIG_TRACES_ENABLED=true
+      - DD_LOGS_ENABLED=true
+    volumes:
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup:/host/sys/fs/cgroup:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /opt/datadog-agent/run:/opt/datadog-agent/run:rw
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+
+  otel-collector:
+    # https://github.com/open-telemetry/opentelemetry-collector-contrib
+    image: otel/opentelemetry-collector-contrib
+    profiles: ["datadog"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - 4317:4317   # OTLP gRPC receiver
+      - 4318:4318   # OTLP http receiver
+      - 1888:1888     # pprof extension
+      - 8888:8888     # Prometheus metrics exposed by the Collector
+      - 8889:8889     # Prometheus exporter metrics
+      - 13133:13133   # health_check extension
+      - 55679:55679   # zpages extension
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_SITE=${DD_SITE}
+
+  # This is a free UI alternative and was quite popular another open source provider is Zipkin.
+  jaeger:
+    profiles: ["dev"]
+    image: jaegertracing/all-in-one:1.53
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    command:
+      - "--query.base-path=/jaeger/ui"
+
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+    restart: unless-stopped
+    ports:
+      - 16686:16686 # Jaeger UI
+      - 4317:4317 # OTLP enabled on ports
+      - 4318:4318
+      - 9411:9411 # Alllow Zipkin collector
+
+  # TODO: Add additional layers and services to test
+
+  # postgres:
+  #   profiles: ["dev", "datadog"]
+  #   image: postgres:12 # revert to previous version and use docker_psql_backup.sh and docker_psql_restore.sh to backup and restore data if needed
+  #   platform: linux/arm64
+  #   ports:
+  #     - 5432:5432
+  #   volumes:
+  #     - ./postgres:/docker-entrypoint-initdb.d:rw
+  #   environment:
+  #     - POSTGRES_MULTIPLE_DATABASES="user","booking"
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=secret
+
+  # redis:
+  #   profiles: ["dev", "datadog"]
+  #   image: redis:6.0.5-alpine
+  #   ports:
+  #     - 6379:6379
+
+  # zookeeper:
+  #   profiles: ["dev", "datadog"]
+  #   image: bitnami/zookeeper:3
+  #   platform: linux/amd64
+  #   ports:
+  #     - 2181:2181
+  #   environment:
+  #     - ALLOW_ANONYMOUS_LOGIN=yes
+
+  # kafka:
+  #   profiles: ["dev", "datadog"]
+  #   image: bitnami/kafka:2
+  #   platform: linux/amd64
+  #   ports:
+  #     - 9092:9092
+  #   environment:
+  #     - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+  #     - ALLOW_PLAINTEXT_LISTENER=yes
+  #     - KAFKA_LISTENERS=INTERNAL://:29092,EXTERNAL://:9092
+  #     - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+  #     - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  #     - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+  #     - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true #enable auto topic creation for local development.
+  #   depends_on:
+  #     - zookeeper
+
+  # ######################################################################################################################
+  # # kafdrop, is used for monitoring local kafka local statuses and check topics running detail
+  # # * http://localhost:9999/
+  # ######################################################################################################################
+  # kafdrop:
+  #   profiles: ["dev", "datadog"]
+  #   image: obsidiandynamics/kafdrop:latest
+  #   platform: linux/amd64
+  #   ports:
+  #     - 9999:9000
+  #   environment:
+  #     - KAFKA_BROKERCONNECT=kafka:29092
+  #   depends_on:
+  #     - kafka
