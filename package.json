@@ -8,11 +8,9 @@
     "start:dev": "nodemon --import ./src/instrumentation.mjs ./src/server.js",
     "start:dev:pino": "yarn start:dev | pino-pretty -m 'message'",
     "start": "node --import ./src/instrumentation.mjs ./src/server.js",
-
     "docker:dev": "docker-compose --profile dev -f ./docker/docker-compose.yml",
     "docker:dev:up": "yarn docker:dev up",
     "docker:dev:down": "yarn docker:dev down",
-
     "docker:datadog": "docker-compose --profile datadog -f ./docker/docker-compose.yml",
     "docker:datadog:up": "yarn docker:datadog up",
     "docker:datadog:down": "yarn docker:datadog down"
@@ -20,8 +18,9 @@
   "dependencies": {
     "@mattrglobal/platform-logging": "^2.1.1",
     "@opentelemetry/api": "^1.6.0",
-    "@opentelemetry/auto-instrumentations-node": "^0.39.4",
+    "@opentelemetry/auto-instrumentations-node": "0.47.1",
     "@opentelemetry/context-async-hooks": "^1.17.1",
+    "@opentelemetry/instrumentation-kafkajs": "0.1.0",
     "@opentelemetry/resources": "^1.17.1",
     "@opentelemetry/sdk-metrics": "^1.17.1",
     "@opentelemetry/sdk-node": "^0.44.0",

@@ -9,4 +9,5 @@ export default {
   // Logs & Tracing configuration
   samplePercentage: 0.4,
   defaultConsoleExporter: false,
+  tracingUrl: process.env.OTEL_TRACING_URL || "http://localhost:4318/v1/traces"
 };

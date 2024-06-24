@@ -21,54 +21,13 @@ import {
 } from "@opentelemetry/core";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import config from "./config.js";
-
-import opentelemetry from "@opentelemetry/api";
-
-class RequestIdSpanPropagator extends BatchSpanProcessor {
-  attributes;
-
-  constructor(exporter, attributes = {}) {
-    super(exporter);
-    this.attributes = attributes;
-  }
-
-  /**
-   * Append x-request-id to all span attributes this isn't strictly needed but it can be helpful
-   * For the example where you need a to send a http client request out later you can use the span
-   * as a context manager of sorts.
-   *
-   * @param {*} childSpan child span
-   * @param {*} parentContext parent context of the child span
-   */
-  appendRequestId(childSpan, parentContext) {
-    const parentSpan = opentelemetry.trace.getSpan(parentContext);
-    const parentAttributes = parentSpan?.attributes;
-
-    const requestId =
-      parentAttributes?.["http.request.header.x_request_id"]?.[0] ||
-      parentAttributes?.["x-request-id"];
-
-    if (requestId) {
-      // Set attribute on the child span
-      childSpan.setAttribute("x-request-id", requestId);
-      parentSpan.setAttribute("x-request-id", requestId);
-    }
-  }
-
-  onStart(span, parentContext) {
-    super.onStart(span, parentContext);
-    this.appendRequestId(span, parentContext);
-  }
-
-  onEnd(span, parentContext) {
-    super.onEnd(span, parentContext);
-  }
-}
+import { KafkaJsInstrumentation } from "@opentelemetry/instrumentation-kafkajs";
 
 const otlpTraceExporter = new OTLPTraceExporter({
-  url: "http://localhost:4318/v1/traces",
-  // optional - collection of custom headers to be sent with each request, empty by default
-  headers: {},
+  url: config.tracingUrl,
+  headers: {
+    // "x-api-key": "blah"
+  },
 });
 
 const tracerProvider = new NodeTracerProvider({
@@ -78,7 +37,7 @@ const tracerProvider = new NodeTracerProvider({
     [SemanticResourceAttributes.SERVICE_NAMESPACE]: config.namespace,
   }),
   // https://opentelemetry.io/docs/concepts/sampling/
-  sampler: config.env === 'development'
+  sampler: config.env === "development"
     ? new AlwaysOnSampler()
     : new ParentBasedSampler({
         // For production we don't really care about successful requests all the time, but we might always want this for errors
@@ -88,7 +47,8 @@ const tracerProvider = new NodeTracerProvider({
 });
 
 // Add exporters
-tracerProvider.addSpanProcessor(new RequestIdSpanPropagator(otlpTraceExporter));
+tracerProvider.addSpanProcessor(new BatchSpanProcessor(otlpTraceExporter));
+
 // Only to show the open-telemetry default console format.
 config.defaultConsoleExporter &&
   tracerProvider.addSpanProcessor(
@@ -97,6 +57,8 @@ config.defaultConsoleExporter &&
 
 tracerProvider.register({
   textMapPropagator: new CompositePropagator({
+    // Standard to allowing context to be shared between services
+    // https://www.w3.org/TR/trace-context/
     propagators: [new W3CBaggagePropagator(), new W3CTraceContextPropagator()],
   }),
 });
@@ -107,6 +69,21 @@ const allowedHttpHeaders = ["x-request-id", "x-tenant-id", "x-tenant-host"];
 
 registerInstrumentations({
   instrumentations: [
+    // Manual instrumentations
+    new KafkaJsInstrumentation({
+      consumerHook(span, message) {
+        // Example append attributes to span
+        span.setAttribute("kafka.topic", message.topic);
+        span.setAttribute("requestId", message.headers?.requestId);
+        span.setAttribute("tenantId", message.headers?.tenantId);
+      },
+      producerHook(span, message) {
+        // Example
+        span.setAttribute("kafka.topic", message.topic);
+        span.setAttribute("requestId", message.headers?.requestId);
+        span.setAttribute("tenantId", message.headers?.tenantId);
+      }
+    }),
     // Configure http auto instrumentation, by default this enables all supported instrumentors
     // Another option is to manually add them, since this is an example i'm just going to enable everything.
     // https://github.com/open-telemetry/opentelemetry-js-contrib/blob/038e0bfda951055ce91724a3b4a3042a9f918700/metapackages/auto-instrumentations-node/src/utils.ts#L86
@@ -124,37 +101,41 @@ registerInstrumentations({
           },
         },
       },
+      "@opentelemetry/instrumentation-express": {
+        requestHook(span, request) {
+          const requestId = request.request.header("x-request-id");
+          const tenantId = request.request.header("x-tenant-id");
+          // ...
+
+          requestId && span.setAttribute("requestId", requestId);
+          tenantId && span.setAttribute("tenantId", tenantId);
+        },
+      },
+      // Automatically injects the span_id & trace_id into logs
       "@opentelemetry/instrumentation-winston": {
-        // disable winston logs when using otel default
-        enabled: !config.defaultConsoleExporter,
         // Hook called whenever we log with winston
-        logHook: (span, record) => {
-          const { level, message, requestId, tenantId, error } = record;
-
-          requestId && span.setAttribute("log.requestId", requestId);
-          tenantId && span.setAttribute("log.tenantId", tenantId);
-
-          // Skip events for trace and debug logs since they can used for trailing values
-          if (["trace", "debug"].includes(level)) {
-            return;
-          }
-
-          span.addEvent(message, record);
+        logHook(span, record) {
+          const { level, error } = record;
 
           if (level === "error") {
+            // Mark the span as an error & set the error detail
             span.recordException(error);
             span.setStatus(SpanStatusCode.ERROR);
           }
         },
       },
-      "@opentelemetry/instrumentation-fs": {
-        // Disable node:fs spans
-        enabled: false,
-      },
       "@opentelemetry/instrumentation-pg": {
         requireParentSpan: true,
         enhancedDatabaseReporting: true,
       },
+      "@opentelemetry/instrumentation-knex": {},
+      "@opentelemetry/instrumentation-redis": {},
+      "@opentelemetry/instrumentation-aws-sdk": {},
+      "@opentelemetry/instrumentation-fs": {
+        // Disable node:fs spans
+        enabled: false,
+      },
+      // ...
     }),
   ],
 });
